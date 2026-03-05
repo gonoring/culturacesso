@@ -1,8 +1,13 @@
 import sqlite3
+import json
 import os
+from pathlib import Path
 from contextlib import contextmanager
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "culturacesso.db")
+
+# Caminho do seed relativo a raiz do projeto
+SEED_PATH = Path(__file__).parent.parent / "data" / "seed.json"
 
 
 def init_db():
@@ -45,6 +50,29 @@ def init_db():
         )
     """)
     conn.commit()
+
+    # Auto-seed: se a tabela editais_estruturados estiver vazia e existir seed.json, carrega
+    count = conn.execute("SELECT COUNT(*) FROM editais_estruturados").fetchone()[0]
+    if count == 0 and SEED_PATH.exists():
+        print(f"[SEED] Banco vazio. Carregando {SEED_PATH}...")
+        try:
+            seed_data = json.loads(SEED_PATH.read_text(encoding="utf-8"))
+            for item in seed_data:
+                conn.execute("""
+                    INSERT OR IGNORE INTO editais_estruturados
+                    (id_bruto, dados_json, data_processamento, confianca_extracao)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    item["id_bruto"],
+                    item["dados_json"],
+                    item["data_processamento"],
+                    item["confianca_extracao"],
+                ))
+            conn.commit()
+            print(f"[SEED] {len(seed_data)} editais carregados do seed.")
+        except Exception as e:
+            print(f"[SEED] Erro ao carregar seed: {e}")
+
     conn.close()
 
 
