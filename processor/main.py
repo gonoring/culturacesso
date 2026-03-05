@@ -1,7 +1,32 @@
+import io
 from scraper.storage import ScraperStorage
 from .extractor import extrair_atributos
 from datetime import datetime
 import sqlite3
+
+try:
+    import pdfplumber
+    HAS_PDFPLUMBER = True
+except ImportError:
+    HAS_PDFPLUMBER = False
+    print("[WARN] pdfplumber nao instalado. PDFs nao serao extraidos.")
+
+
+def extrair_texto_pdf(pdf_bytes: bytes) -> str:
+    """Extrai texto de um PDF usando pdfplumber."""
+    if not HAS_PDFPLUMBER or not pdf_bytes:
+        return ""
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            textos = []
+            for page in pdf.pages:
+                texto = page.extract_text()
+                if texto:
+                    textos.append(texto)
+            return "\n\n".join(textos)
+    except Exception as e:
+        print(f"  [WARN] Falha ao extrair PDF: {e}")
+        return ""
 
 
 def processar_pendentes():
@@ -28,13 +53,28 @@ def processar_pendentes():
     skip_count = 0
 
     for i, edital_bruto in enumerate(pendentes, 1):
-        conteudo = edital_bruto.get("conteudo_html") or ""
+        conteudo_html = edital_bruto.get("conteudo_html") or ""
+        pdf_bytes = edital_bruto.get("pdf_bytes")
+
+        # Extrai texto do PDF se disponivel
+        texto_pdf = ""
+        if pdf_bytes:
+            texto_pdf = extrair_texto_pdf(pdf_bytes)
+            if texto_pdf:
+                print(f"  [PDF] Extraido {len(texto_pdf)} chars do PDF")
+
+        # Combina HTML + texto do PDF para conteudo maximo
+        conteudo = conteudo_html
+        if texto_pdf:
+            conteudo = f"{conteudo_html}\n\n--- CONTEUDO EXTRAIDO DO PDF DO EDITAL ---\n\n{texto_pdf}"
+
         if not conteudo or len(conteudo.strip()) < 20:
-            print(f"[SKIP] Edital {edital_bruto['id']} sem conteudo HTML.")
+            print(f"[SKIP] Edital {edital_bruto['id']} sem conteudo (HTML nem PDF).")
             skip_count += 1
             continue
 
         print(f"\n[{i}/{len(pendentes)}] Processando: {edital_bruto['titulo'][:60]}...")
+        print(f"  Conteudo: {len(conteudo_html)} chars HTML + {len(texto_pdf)} chars PDF = {len(conteudo)} total")
 
         try:
             estruturado = extrair_atributos(

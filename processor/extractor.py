@@ -3,10 +3,13 @@ import json
 import re
 from pathlib import Path
 from datetime import datetime
+from pathlib import Path as _Path
 from dotenv import load_dotenv
 from .schema import EditalEstruturado, AreaCultural, NaturezaJuridica
 
-load_dotenv()
+# Carrega .env do diretorio raiz do projeto
+_env_path = _Path(__file__).parent.parent / ".env"
+load_dotenv(_env_path, override=True)
 
 client = anthropic.Anthropic()  # usa ANTHROPIC_API_KEY do ambiente
 
@@ -40,7 +43,7 @@ def extrair_atributos(conteudo: str, id_bruto: int, url_origem: str) -> EditalEs
     Chama Claude para extrair atributos estruturados de um edital.
     Retorna EditalEstruturado ou None em caso de falha.
     """
-    prompt = PROMPT_TEMPLATE.replace("{conteudo}", conteudo[:12000])  # limita tokens
+    prompt = PROMPT_TEMPLATE.replace("{conteudo}", conteudo[:25000])  # limita tokens
 
     try:
         response = client.messages.create(

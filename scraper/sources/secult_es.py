@@ -38,46 +38,73 @@ class SecultEsScraper(BaseScraper):
                 await browser.close()
                 return editais
 
-            # Extrai todos os dados de uma vez via JavaScript
+            # Expande todos os paineis colapsaveis antes de extrair
+            try:
+                await page.evaluate("""
+                    () => {
+                        const panels = document.querySelectorAll('.collapse, .panel-collapse');
+                        for (const p of panels) {
+                            p.classList.add('show', 'in');
+                            p.style.display = 'block';
+                            p.style.height = 'auto';
+                        }
+                    }
+                """)
+                await page.wait_for_timeout(1000)
+            except Exception:
+                pass
+
+            # Extrai dados via JavaScript — CORRIGIDO:
+            # O data-toggle="collapse" esta no <a> PAI do h4, nao no h4.
+            # O painel e referenciado pelo href do <a> (ex: #collapse-37447).
             dados = await page.evaluate(
                 """
                 () => {
-                    // Pega h4 que sao toggles de collapse (editais)
-                    let toggles = document.querySelectorAll('h4[data-toggle="collapse"]');
+                    // Busca os <a> com data-toggle="collapse" que contem um h4
+                    const toggleLinks = document.querySelectorAll('a[data-toggle="collapse"]');
+                    const results = [];
+                    const seen = new Set();
 
-                    // Fallback: h4 cujo texto comeca com "Edital"
-                    if (toggles.length === 0) {
-                        toggles = Array.from(document.querySelectorAll('h4'))
-                            .filter(h => h.textContent.trim().match(/^Edital\\s/i));
-                    }
+                    for (const a of toggleLinks) {
+                        const h4 = a.querySelector('h4');
+                        if (!h4) continue;
 
-                    return Array.from(toggles).map(h4 => {
                         const titulo = h4.textContent.trim();
+                        if (!titulo.match(/^Edital\\s/i)) continue;
+                        if (seen.has(titulo)) continue;
+                        seen.add(titulo);
 
-                        // Busca o painel de collapse associado (proximo irmao div.collapse)
-                        let panel = h4.nextElementSibling;
-                        while (panel && !panel.classList.contains('collapse')) {
-                            panel = panel.nextElementSibling;
+                        // Busca o painel pelo ID referenciado no href
+                        const target = a.getAttribute('href') || a.getAttribute('data-target');
+                        let panel = null;
+                        if (target && target.startsWith('#')) {
+                            panel = document.querySelector(target);
                         }
 
-                        // Combina h4 + painel para conteudo completo
                         const pdfLinks = [];
                         let texto = titulo;
-                        let html = h4.outerHTML;
+                        let html = a.outerHTML;
 
                         if (panel) {
-                            const allLinks = Array.from(panel.querySelectorAll('a'));
-                            for (const a of allLinks) {
-                                if (a.href && a.href.toLowerCase().includes('.pdf')) {
-                                    pdfLinks.push(a.href);
+                            // Texto completo do painel
+                            texto += '\\n\\n' + panel.innerText;
+                            html = a.outerHTML + '\\n' + panel.outerHTML;
+
+                            // Links de PDF (sem duplicatas)
+                            const seenPdfs = new Set();
+                            const allLinks = panel.querySelectorAll('a[href]');
+                            for (const link of allLinks) {
+                                const href = link.href || '';
+                                if (href.toLowerCase().includes('.pdf') && !seenPdfs.has(href)) {
+                                    seenPdfs.add(href);
+                                    pdfLinks.push(href);
                                 }
                             }
-                            texto += ' ' + panel.textContent;
-                            html += panel.innerHTML;
                         }
 
-                        return { titulo, pdfLinks, texto, html };
-                    });
+                        results.push({ titulo, pdfLinks, texto, html });
+                    }
+                    return results;
                 }
             """
             )
