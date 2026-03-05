@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -23,7 +24,10 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="manifest" href="/manifest.json" />
       </head>
-      <body className="bg-slate-900 text-white antialiased">{children}</body>
+      <body className="bg-slate-900 text-white antialiased">
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
