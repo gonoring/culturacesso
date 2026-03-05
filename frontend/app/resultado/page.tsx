@@ -108,6 +108,23 @@ export default function ResultadoPage() {
           )}
         </div>
 
+        {/* Aviso se todos encerrados */}
+        {editais.length > 0 &&
+          editais.every(
+            (e) => e.dias_restantes !== null && e.dias_restantes <= 0
+          ) && (
+            <div className="mb-6 bg-amber-900/30 border border-amber-800 rounded-xl px-5 py-4 text-center">
+              <p className="text-amber-400 text-sm font-medium">
+                ⏳ Todos os editais compatíveis com seu perfil estão encerrados
+                no momento.
+              </p>
+              <p className="text-amber-500/80 text-xs mt-1">
+                Novos editais são publicados periodicamente — cadastre-se abaixo
+                para ser notificado quando abrirem novas oportunidades.
+              </p>
+            </div>
+          )}
+
         {/* Cards dos editais */}
         {editais.length > 0 ? (
           <div className="flex flex-col gap-4 mb-10">

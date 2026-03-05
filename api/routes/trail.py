@@ -29,11 +29,26 @@ def calcular_resultado(respostas: RespostasUsuario):
             continue
 
     compativeis = filtrar_editais(respostas.model_dump(), editais)
-
-    # Ordena: primeiro os de maior valor maximo, depois por dificuldade
-    compativeis.sort(key=lambda e: (-(e.valor_maximo or 0), e.dificuldade))
-
     hoje = date.today()
+
+    # Ordena: editais abertos primeiro, depois por maior valor, depois dificuldade
+    def _sort_key(e):
+        enc = e.data_encerramento
+        if enc:
+            if isinstance(enc, datetime):
+                enc_d = enc.date()
+            elif isinstance(enc, str):
+                try:
+                    enc_d = datetime.fromisoformat(enc).date()
+                except ValueError:
+                    enc_d = None
+            else:
+                enc_d = enc
+            encerrado = 1 if (enc_d and enc_d < hoje) else 0
+        else:
+            encerrado = 0  # Sem data = aberto
+        return (encerrado, -(e.valor_maximo or 0), e.dificuldade)
+    compativeis.sort(key=_sort_key)
     resultados = []
     for e in compativeis:
         # Calcula dias restantes
