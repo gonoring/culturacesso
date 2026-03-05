@@ -1,0 +1,16 @@
+Voce e um especialista em editais culturais brasileiros.
+
+Dado o seguinte edital estruturado, gere perguntas qualificadoras que ajudem a determinar se um projeto cultural e compativel com este edital.
+
+Cada pergunta deve ter:
+- id: identificador unico (ex: "q_natureza_juridica")
+- texto: a pergunta para o usuario
+- tipo: "single_choice", "multi_choice", "boolean" ou "number"
+- opcoes: lista de opcoes com "valor" e "label"
+- logica_eliminacao: para cada opcao, indica se elimina ou mantem o edital
+
+Gere entre 3 e 6 perguntas focadas nos criterios mais eliminatorios deste edital.
+Responda APENAS com o JSON (lista de perguntas). Sem texto adicional.
+
+EDITAL:
+{edital_json}
