@@ -17,9 +17,11 @@ class RespostasUsuario(BaseModel):
 class EditalResultado(BaseModel):
     titulo: str
     orgao: str
+    valor_minimo: Optional[float] = None
     valor_maximo: Optional[float] = None
     dificuldade: str
     data_encerramento: Optional[str] = None
+    dias_restantes: Optional[int] = None  # None = sem prazo definido
     url: str
     areas: list[str]
 

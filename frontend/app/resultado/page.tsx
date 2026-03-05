@@ -8,9 +8,11 @@ import CTAAssessoria from "@/components/CTAAssessoria";
 type EditalResultado = {
   titulo: string;
   orgao: string;
+  valor_minimo: number | null;
   valor_maximo: number | null;
   dificuldade: "baixa" | "media" | "alta";
   data_encerramento: string | null;
+  dias_restantes: number | null;
   url: string;
   areas: string[];
 };

@@ -14,6 +14,7 @@ Estrutura da trilha:
   Resultado — Editais compativeis, valores e dificuldade
 """
 
+from datetime import datetime, date
 from .schema import EditalEstruturado
 
 PERGUNTAS_FIXAS = [
@@ -106,8 +107,22 @@ def filtrar_editais(respostas: dict, editais: list[EditalEstruturado]) -> list[E
     }
     """
     compativeis = []
+    hoje = date.today()
 
     for edital in editais:
+        # Filtro 0: Edital vencido — nao mostra se ja encerrou
+        if edital.data_encerramento:
+            enc = edital.data_encerramento
+            if isinstance(enc, datetime):
+                enc = enc.date()
+            elif isinstance(enc, str):
+                try:
+                    enc = datetime.fromisoformat(enc).date()
+                except ValueError:
+                    enc = None
+            if enc and enc < hoje:
+                continue
+
         # Helper: pega valor string do enum ou string direto
         edital_nj = edital.natureza_juridica.value if hasattr(edital.natureza_juridica, "value") else str(edital.natureza_juridica)
 
