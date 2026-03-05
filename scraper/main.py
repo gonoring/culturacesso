@@ -1,12 +1,12 @@
 import asyncio
 from .sources.secult_es import SecultEsScraper
-from .sources.funcultura import FunculturaScraper
+from .sources.funcultura import GovernoEsScraper
 from .sources.prefeitura_vitoria import PrefeituraVitoriaScraper
 from .storage import ScraperStorage
 
 SCRAPERS = [
     SecultEsScraper,
-    FunculturaScraper,
+    GovernoEsScraper,
     PrefeituraVitoriaScraper,
 ]
 

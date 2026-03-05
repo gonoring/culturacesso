@@ -7,7 +7,14 @@ import re
 
 
 class SecultEsScraper(BaseScraper):
-    BASE_URL = "https://secult.es.gov.br/editais"
+    """Scraper para editais da Secretaria de Cultura do ES (Secult).
+
+    A pagina usa Bootstrap 4 com data-toggle="collapse".
+    Cada edital tem um h4 com [data-toggle="collapse"] e uma
+    tabela .table com links de PDF dentro do painel colapsavel.
+    """
+
+    BASE_URL = "https://secult.es.gov.br/edital-2025"
 
     async def listar_editais(self) -> list[EditalBruto]:
         editais = []
@@ -23,76 +30,95 @@ class SecultEsScraper(BaseScraper):
                 await browser.close()
                 return editais
 
-            # Aguarda container de editais carregar
+            # Aguarda os h4 carregarem
             try:
-                await page.wait_for_selector(
-                    ".editais-list, .post-list, article, .edital-item, .list-group-item",
-                    timeout=10000
-                )
+                await page.wait_for_selector("h4", timeout=10000)
             except Exception:
-                print("[SECULT-ES] Nenhum container de editais encontrado.")
+                print("[SECULT-ES] Nenhum edital encontrado na pagina.")
                 await browser.close()
                 return editais
 
-            items = await page.query_selector_all(
-                "article, .edital-item, .list-group-item, .post-item"
+            # Extrai todos os dados de uma vez via JavaScript
+            dados = await page.evaluate(
+                """
+                () => {
+                    // Pega h4 que sao toggles de collapse (editais)
+                    let toggles = document.querySelectorAll('h4[data-toggle="collapse"]');
+
+                    // Fallback: h4 cujo texto comeca com "Edital"
+                    if (toggles.length === 0) {
+                        toggles = Array.from(document.querySelectorAll('h4'))
+                            .filter(h => h.textContent.trim().match(/^Edital\\s/i));
+                    }
+
+                    return Array.from(toggles).map(h4 => {
+                        const titulo = h4.textContent.trim();
+
+                        // Busca o painel de collapse associado (proximo irmao div.collapse)
+                        let panel = h4.nextElementSibling;
+                        while (panel && !panel.classList.contains('collapse')) {
+                            panel = panel.nextElementSibling;
+                        }
+
+                        // Combina h4 + painel para conteudo completo
+                        const pdfLinks = [];
+                        let texto = titulo;
+                        let html = h4.outerHTML;
+
+                        if (panel) {
+                            const allLinks = Array.from(panel.querySelectorAll('a'));
+                            for (const a of allLinks) {
+                                if (a.href && a.href.toLowerCase().includes('.pdf')) {
+                                    pdfLinks.push(a.href);
+                                }
+                            }
+                            texto += ' ' + panel.textContent;
+                            html += panel.innerHTML;
+                        }
+
+                        return { titulo, pdfLinks, texto, html };
+                    });
+                }
+            """
             )
 
-            for item in items:
+            print(f"[SECULT-ES] {len(dados)} editais encontrados na pagina.")
+
+            for item in dados:
                 try:
-                    titulo_el = await item.query_selector("h2, h3, .titulo, a")
-                    titulo = await titulo_el.inner_text() if titulo_el else "Sem titulo"
+                    titulo = item["titulo"]
+                    pdf_urls = item["pdfLinks"]
+                    texto = item["texto"]
+                    html = item["html"]
 
-                    link_el = await item.query_selector("a")
-                    url = await link_el.get_attribute("href") if link_el else None
+                    # Normaliza URLs de PDF
+                    pdfs_normalizados = []
+                    for pdf in pdf_urls:
+                        if not pdf.startswith("http"):
+                            pdf = f"https://secult.es.gov.br{pdf}"
+                        pdfs_normalizados.append(pdf)
 
-                    # Normaliza URL relativa
-                    if url and not url.startswith("http"):
-                        url = f"https://secult.es.gov.br{url}"
-
-                    # Data de encerramento — padrao comum: "Inscricoes ate DD/MM/AAAA"
-                    texto = await item.inner_text()
+                    hash_c = hashlib.sha256(html.encode()).hexdigest()
                     data_enc = self._extrair_data(texto)
-
-                    conteudo_html = await item.inner_html()
-                    hash_c = hashlib.sha256(conteudo_html.encode()).hexdigest()
 
                     edital = EditalBruto(
                         fonte="secult_es",
-                        titulo=titulo.strip(),
-                        url_origem=url or self.BASE_URL,
+                        titulo=titulo,
+                        url_origem=self.BASE_URL,
                         data_publicacao=None,
                         data_encerramento=data_enc,
-                        conteudo_html=conteudo_html,
-                        url_pdf=None,
+                        conteudo_html=html,
+                        url_pdf=pdfs_normalizados[0] if pdfs_normalizados else None,
                         pdf_bytes=None,
                         hash_conteudo=hash_c,
                     )
 
-                    # Tenta acessar pagina interna para pegar conteudo completo e PDF
-                    if url and not url.endswith(".pdf"):
-                        try:
-                            await page.goto(url, wait_until="networkidle", timeout=15000)
-                            # Busca link de PDF na pagina interna
-                            pdf_link = await page.query_selector("a[href$='.pdf']")
-                            if pdf_link:
-                                pdf_url = await pdf_link.get_attribute("href")
-                                if pdf_url and not pdf_url.startswith("http"):
-                                    pdf_url = f"https://secult.es.gov.br{pdf_url}"
-                                edital.url_pdf = pdf_url
-                                edital.pdf_bytes = await self.baixar_pdf(pdf_url)
-                            edital.conteudo_html = await page.content()
-                            edital.hash_conteudo = hashlib.sha256(
-                                edital.conteudo_html.encode()
-                            ).hexdigest()
-                            await page.go_back(wait_until="networkidle", timeout=10000)
-                        except Exception as e:
-                            print(f"[SECULT-ES] Erro ao acessar pagina interna: {e}")
-                    elif url and url.endswith(".pdf"):
-                        edital.url_pdf = url
-                        edital.pdf_bytes = await self.baixar_pdf(url)
+                    # Baixa o primeiro PDF se disponivel
+                    if edital.url_pdf:
+                        edital.pdf_bytes = await self.baixar_pdf(edital.url_pdf)
 
                     editais.append(edital)
+                    print(f"  [OK] {titulo[:80]}")
                 except Exception as e:
                     print(f"[SECULT-ES] Erro ao processar item: {e}")
                     continue
@@ -102,11 +128,12 @@ class SecultEsScraper(BaseScraper):
         return editais
 
     def _extrair_data(self, texto: str) -> Optional[datetime]:
+        """Extrai a ultima data no formato DD/MM/AAAA encontrada no texto."""
         padrao = r"\d{2}/\d{2}/\d{4}"
-        match = re.search(padrao, texto)
-        if match:
+        datas = re.findall(padrao, texto)
+        if datas:
             try:
-                return datetime.strptime(match.group(), "%d/%m/%Y")
+                return datetime.strptime(datas[-1], "%d/%m/%Y")
             except ValueError:
                 return None
         return None

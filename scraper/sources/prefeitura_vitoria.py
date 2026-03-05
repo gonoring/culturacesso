@@ -7,7 +7,16 @@ import re
 
 
 class PrefeituraVitoriaScraper(BaseScraper):
-    BASE_URL = "https://cultura.vitoria.es.gov.br/editais"
+    """Scraper para editais da Secretaria de Cultura de Vitoria (SEMC).
+
+    O portal de editais (vitoria.es.gov.br/editais-semc) redireciona para
+    sistemas.vitoria.es.gov.br/docOficial/?tp=template3&c=78, que carrega
+    os editais via AJAX no container #dvContainer.
+    """
+
+    # URL final apos redirect
+    BASE_URL = "https://sistemas.vitoria.es.gov.br/docOficial/?tp=template3&c=78"
+    DOMAIN = "https://sistemas.vitoria.es.gov.br"
 
     async def listar_editais(self) -> list[EditalBruto]:
         editais = []
@@ -23,72 +32,131 @@ class PrefeituraVitoriaScraper(BaseScraper):
                 await browser.close()
                 return editais
 
+            # Aguarda o container AJAX carregar com conteudo
             try:
-                await page.wait_for_selector(
-                    "article, .edital-item, .post-item, .list-group-item",
-                    timeout=10000
+                await page.wait_for_selector("#dvContainer", timeout=10000)
+                # Espera adicional para o AJAX popular o container
+                await page.wait_for_function(
+                    """() => {
+                        const c = document.querySelector('#dvContainer');
+                        return c && c.innerHTML.trim().length > 50;
+                    }""",
+                    timeout=15000,
                 )
             except Exception:
-                print("[PMV] Nenhum container de editais encontrado.")
+                print("[PMV] Container de editais vazio ou nao carregou.")
+                # Tenta clicar no ano mais recente para forcar carregamento
+                try:
+                    ano_btn = await page.query_selector(".fAno:first-child, a[onclick*='2026'], a[onclick*='2025']")
+                    if ano_btn:
+                        await ano_btn.click()
+                        await page.wait_for_timeout(3000)
+                except Exception:
+                    pass
+
+            # Tenta extrair novamente apos possivel clique
+            try:
+                await page.wait_for_function(
+                    """() => {
+                        const c = document.querySelector('#dvContainer');
+                        return c && c.children.length > 0;
+                    }""",
+                    timeout=10000,
+                )
+            except Exception:
+                print("[PMV] Nenhum edital encontrado apos espera.")
                 await browser.close()
                 return editais
 
-            items = await page.query_selector_all(
-                "article, .edital-item, .list-group-item, .post-item"
-            )
+            # Extrai dados via JavaScript
+            dados = await page.evaluate("""
+                () => {
+                    const container = document.querySelector('#dvContainer');
+                    if (!container) return [];
 
-            for item in items:
+                    // Busca links para documentos/editais
+                    const links = container.querySelectorAll('a[href]');
+                    const resultados = [];
+                    const visitados = new Set();
+
+                    for (const link of links) {
+                        const url = link.href;
+                        const titulo = link.textContent.trim();
+
+                        if (!titulo || titulo.length < 5 || visitados.has(url)) continue;
+                        visitados.add(url);
+
+                        // Pega o elemento pai para contexto (data, descricao)
+                        const row = link.closest('tr') || link.closest('div') || link.parentElement;
+                        const contexto = row ? row.textContent.trim() : '';
+
+                        resultados.push({
+                            titulo: titulo,
+                            url: url,
+                            contexto: contexto,
+                            html: row ? row.innerHTML : link.outerHTML,
+                            isPdf: url.toLowerCase().endsWith('.pdf')
+                        });
+                    }
+
+                    // Se nao encontrou links, tenta pegar todo o texto do container
+                    if (resultados.length === 0) {
+                        const textos = container.querySelectorAll('div, p, li, tr');
+                        for (const el of textos) {
+                            const texto = el.textContent.trim();
+                            if (texto.length > 20) {
+                                resultados.push({
+                                    titulo: texto.substring(0, 200),
+                                    url: window.location.href,
+                                    contexto: texto,
+                                    html: el.innerHTML,
+                                    isPdf: false
+                                });
+                            }
+                        }
+                    }
+
+                    return resultados;
+                }
+            """)
+
+            print(f"[PMV] {len(dados)} itens encontrados no container.")
+
+            for item in dados:
                 try:
-                    titulo_el = await item.query_selector("h2, h3, .titulo, a")
-                    titulo = await titulo_el.inner_text() if titulo_el else "Sem titulo"
+                    titulo = item["titulo"]
+                    url = item["url"]
+                    contexto = item["contexto"]
+                    html = item["html"]
+                    is_pdf = item["isPdf"]
 
-                    link_el = await item.query_selector("a")
-                    url = await link_el.get_attribute("href") if link_el else None
+                    if not url.startswith("http"):
+                        url = f"{self.DOMAIN}{url}"
 
-                    if url and not url.startswith("http"):
-                        url = f"https://cultura.vitoria.es.gov.br{url}"
-
-                    texto = await item.inner_text()
-                    data_enc = self._extrair_data(texto)
-
-                    conteudo_html = await item.inner_html()
-                    hash_c = hashlib.sha256(conteudo_html.encode()).hexdigest()
+                    # Usa URL + titulo como base do hash (evita colisao quando
+                    # vários itens compartilham o mesmo container HTML)
+                    hash_source = f"{url}|{titulo}"
+                    hash_c = hashlib.sha256(hash_source.encode()).hexdigest()
+                    data_enc = self._extrair_data(contexto)
 
                     edital = EditalBruto(
                         fonte="prefeitura_vitoria",
-                        titulo=titulo.strip(),
-                        url_origem=url or self.BASE_URL,
+                        titulo=titulo[:200],
+                        url_origem=url,
                         data_publicacao=None,
                         data_encerramento=data_enc,
-                        conteudo_html=conteudo_html,
-                        url_pdf=None,
+                        conteudo_html=html,
+                        url_pdf=url if is_pdf else None,
                         pdf_bytes=None,
                         hash_conteudo=hash_c,
                     )
 
-                    # Acessa pagina interna
-                    if url and not url.endswith(".pdf"):
-                        try:
-                            await page.goto(url, wait_until="networkidle", timeout=15000)
-                            pdf_link = await page.query_selector("a[href$='.pdf']")
-                            if pdf_link:
-                                pdf_url = await pdf_link.get_attribute("href")
-                                if pdf_url and not pdf_url.startswith("http"):
-                                    pdf_url = f"https://cultura.vitoria.es.gov.br{pdf_url}"
-                                edital.url_pdf = pdf_url
-                                edital.pdf_bytes = await self.baixar_pdf(pdf_url)
-                            edital.conteudo_html = await page.content()
-                            edital.hash_conteudo = hashlib.sha256(
-                                edital.conteudo_html.encode()
-                            ).hexdigest()
-                            await page.go_back(wait_until="networkidle", timeout=10000)
-                        except Exception as e:
-                            print(f"[PMV] Erro na pagina interna: {e}")
-                    elif url and url.endswith(".pdf"):
-                        edital.url_pdf = url
-                        edital.pdf_bytes = await self.baixar_pdf(url)
+                    # Baixa o PDF se o link for direto para PDF
+                    if edital.url_pdf:
+                        edital.pdf_bytes = await self.baixar_pdf(edital.url_pdf)
 
                     editais.append(edital)
+                    print(f"  [OK] {titulo[:80]}")
                 except Exception as e:
                     print(f"[PMV] Erro ao processar item: {e}")
                     continue
@@ -98,11 +166,12 @@ class PrefeituraVitoriaScraper(BaseScraper):
         return editais
 
     def _extrair_data(self, texto: str) -> Optional[datetime]:
+        """Extrai a ultima data no formato DD/MM/AAAA encontrada no texto."""
         padrao = r"\d{2}/\d{2}/\d{4}"
-        match = re.search(padrao, texto)
-        if match:
+        datas = re.findall(padrao, texto)
+        if datas:
             try:
-                return datetime.strptime(match.group(), "%d/%m/%Y")
+                return datetime.strptime(datas[-1], "%d/%m/%Y")
             except ValueError:
                 return None
         return None
