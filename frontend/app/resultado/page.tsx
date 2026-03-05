@@ -91,7 +91,7 @@ export default function ResultadoPage() {
             Seu projeto pode se enquadrar em
           </p>
           <h1 className="text-5xl font-bold text-white mb-1">
-            {editais.length} edital{editais.length !== 1 ? "is" : ""}
+            {editais.length} {editais.length !== 1 ? "editais" : "edital"}
           </h1>
           {valorTotal > 0 && (
             <p className="text-teal-400 text-xl mt-3">

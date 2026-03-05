@@ -24,7 +24,8 @@ PERGUNTAS_FIXAS = [
         "tipo": "single_choice",
         "opcoes": [
             {"valor": "pessoa_fisica", "label": "Como pessoa física (CPF)"},
-            {"valor": "pessoa_juridica", "label": "Como pessoa jurídica (CNPJ)"},
+            {"valor": "mei", "label": "Como MEI (Microempreendedor Individual)"},
+            {"valor": "pessoa_juridica", "label": "Como pessoa jurídica (CNPJ — ME, EPP, etc.)"},
             {"valor": "osc", "label": "Como organização da sociedade civil (OSC/associação)"},
         ]
     },
@@ -107,11 +108,21 @@ def filtrar_editais(respostas: dict, editais: list[EditalEstruturado]) -> list[E
     compativeis = []
 
     for edital in editais:
+        # Helper: pega valor string do enum ou string direto
+        edital_nj = edital.natureza_juridica.value if hasattr(edital.natureza_juridica, "value") else str(edital.natureza_juridica)
+
         # Filtro 1: Natureza juridica
+        # MEI tem CNPJ mas muitos editais nao aceitam MEI como PJ plena;
+        # tratamos MEI como compativel com editais para PF e PJ/ambos
         nj = respostas.get("natureza_juridica")
         if nj == "pessoa_fisica" and edital.exige_cnpj:
             continue
-        if nj in ("pessoa_juridica", "osc") and edital.natureza_juridica == "pessoa_fisica":
+        if nj == "mei":
+            # MEI nao eh aceito em editais exclusivos para OSC
+            if edital_nj == "osc":
+                continue
+            # MEI passa em editais para PF, PJ e ambos
+        elif nj in ("pessoa_juridica", "osc") and edital_nj == "pessoa_fisica":
             continue
 
         # Filtro 2: Sede no ES

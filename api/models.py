@@ -3,7 +3,7 @@ from typing import Literal, Optional
 
 
 class RespostasUsuario(BaseModel):
-    natureza_juridica: Literal["pessoa_fisica", "pessoa_juridica", "osc"]
+    natureza_juridica: Literal["pessoa_fisica", "mei", "pessoa_juridica", "osc"]
     sede_es: bool
     areas_culturais: list[Literal[
         "musica", "teatro", "danca", "audiovisual", "artes_visuais",
